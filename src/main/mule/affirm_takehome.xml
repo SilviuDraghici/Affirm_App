@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+	
+	
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="3056b351-09ad-418a-aa17-e9643c00910a" basePath="/debug_api/" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	
+	<salesforce:sfdc-config name="SystemA" doc:name="Salesforce Config" doc:id="184cd100-740f-4087-80fe-b65707b3f680" >
+		<salesforce:oauth-user-pass-connection consumerKey="3MVG9Xl3BC6VHB.b7PIiblYyrKylsN6FGt2GpXTu7vKMnhys6oHPhQAnIj5yezbFC_AHvpq0jeduthZUZnrkO" consumerSecret="06F58EDF30EE7296CA5F8F6A20B368FE09626D92A626CC414A12E3E6BE75B84F" username="silviu.dan.draghici@gmail.com_ama1" password="securepassword1" securityToken="ZYtTLEO7MVqzHfpu0riYHNHg"/>
+	</salesforce:sfdc-config>
+	
+	<salesforce:sfdc-config name="SystemB" doc:name="Salesforce Config" doc:id="c8bdc9e6-e207-4263-a073-ad875247f488" >
+		<salesforce:oauth-user-pass-connection consumerKey="3MVG9Xl3BC6VHB.b7PIiblYyrKylsN6FGt2GpXTu7vKMnhys6oHPhQAnIj5yezbFC_AHvpq0jeduthZUZnrkO" consumerSecret="06F58EDF30EE7296CA5F8F6A20B368FE09626D92A626CC414A12E3E6BE75B84F" username="silviu.dan.draghici@gmail.com_ama1" password="securepassword1" securityToken="ZYtTLEO7MVqzHfpu0riYHNHg"/>
+	</salesforce:sfdc-config>
+	
+	
+	<flow name="Schedulte_Data_Copy" doc:id="38bd5abf-b597-4fff-b7e1-ae50b8d98bed" >
+		<scheduler doc:name="Scheduler" doc:id="e4ff29ce-1f24-46c0-a848-5270845fc79e" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="5" timeUnit="MINUTES"/>
+			</scheduling-strategy>
+		</scheduler>
+		<os:retrieve doc:name="case_ID_watermark" doc:id="0386d7ca-bc04-4ccb-a5e5-f2300eb82ccc" key="case_ID_watermark" target="case_ID_watermark">
+			<os:default-value><![CDATA[-1]]></os:default-value>
+		</os:retrieve>
+		<flow-ref doc:name="Copy_Data" doc:id="f1397e51-4eca-45a2-844c-521b958940db" name="Copy_Data"/>
+		<os:store doc:name="case_ID_watermark" doc:id="96cba1fd-052a-44f7-9f55-c24beca47438" key="case_ID_watermark">
+			<os:value><![CDATA[#[vars.case_ID_watermark]]]></os:value>
+		</os:store>
+	</flow>
+	<flow name="Copy_Data" doc:id="5a8ff206-b2b7-43d3-822b-b312ba016a0f" >
+		<salesforce:query doc:name="Query" doc:id="a576fa7d-6177-4242-9bd0-c537101ab1ab" config-ref="SystemA">
+			<salesforce:salesforce-query ><![CDATA[SELECT Case_ID__c, Name, Country__c, data_number__c, data_text__c
+FROM Case__c
+WHERE Case_ID__c > :case_id]]></salesforce:salesforce-query>
+			<salesforce:parameters ><![CDATA[#[output application/java
+---
+{
+	case_id : vars.case_ID_watermark
+}]]]></salesforce:parameters>
+		</salesforce:query>
+		
+		<logger level="INFO" doc:name="num records" doc:id="2d0a5e3e-1f0a-4f8c-bd50-42ce9e3af0f8" message='#["Copying " ++ sizeOf(payload) as String ++ " Records"]'/>
+		<choice doc:name="Choice" doc:id="d7b3a3d6-0210-4e67-a28c-59bacb733252" >
+			<when expression="#[sizeOf(payload) &gt; 0]">
+				<set-variable value="#[(payload maxBy $.Case_ID__c as Number).Case_ID__c as Number]" doc:name="new case_ID_watermark" doc:id="93c29e2c-a558-4d1d-9c3e-1ab2a34c4cdb" variableName="case_ID_watermark" />
+				<ee:transform doc:name="group by country" doc:id="9e373394-7e3f-47da-b7c4-70ff0a1a5f60">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload groupBy (item) -> item.Country__c]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+				<scatter-gather doc:name="Scatter-Gather" doc:id="c23c3a5a-6b2f-41bd-9d1b-15f428f21463">
+			<route>
+				<ee:transform doc:name="create USA Cases" doc:id="bd557c87-cb3e-4630-91a2-457fbb2b4f92">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload.USA map (item) -> 
+{ 
+	Case_ID__c: item.Case_ID__c as Number,
+	Name: item.Name,
+	data_text__c: item.data_text__c,
+	data_number__c: item.data_number__c as Number
+}
+]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<ee:transform doc:name="DEBUG add invalid case" doc:id="691c5f4d-1622-483a-9594-9b20e5ce6daf">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[{ 
+	Case_ID__c: "a",
+	Name: "b",
+	data_text__c: "c",
+	data_number__c: 3
+}] ++ payload ++
+[{ 
+	Case_ID__c: "c",
+	Name: "b",
+	data_text__c: "c",
+	data_number__c: 3
+}]]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<foreach doc:name="For Each" doc:id="8c829912-7bff-4e3e-8a66-538b4c0fddc6" batchSize="2">
+					<salesforce:upsert doc:name="USA Upsert" doc:id="218c1e28-c5cb-46ef-99ca-778e41293d45" config-ref="SystemB" objectType="USA_Case__c" target="upsert_result" externalIdFieldName="Case_ID__c">
+		</salesforce:upsert>
+					<flow-ref doc:name="record failed records" doc:id="2d9c076c-7522-4d5b-8376-4d42d2a36615" name="record_failed_records" />
+				</foreach>
+			</route>
+			
+			<route>
+				<ee:transform doc:name="create CAN Cases" doc:id="62af708f-2952-4bcf-8351-6464998b9e7e">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload.CAN map (item) -> 
+{ 
+	Case_ID__c: item.Case_ID__c as Number,
+	Name: item.Name,
+	data_text__c: item.data_text__c,
+	data_number__c: item.data_number__c as Number
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<ee:transform doc:name="DEBUG add invalid case" doc:id="aa065d9b-90e1-4b02-b35c-6e593073edbb">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[{ 
+	Case_ID__c: "b",
+	Name: "b",
+	data_text__c: "c",
+	data_number__c: 3
+}] ++ payload]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<foreach doc:name="For Each" doc:id="c650ea1d-2060-4165-a71a-e83fc1ce095e" batchSize="2">
+					<salesforce:upsert doc:name="CAN Upsert" doc:id="accda284-ddfc-42b3-af67-705747714171" config-ref="SystemB" objectType="CAN_Case__c" target="upsert_result" externalIdFieldName="Case_ID__c">
+		</salesforce:upsert>
+					<flow-ref doc:name="record failed records" doc:id="3323d270-cdef-46c7-9707-69375d29e007" name="record_failed_records" />
+				</foreach>
+			
+</route>
+			
+			<route>
+				<ee:transform doc:name="create AUS Cases" doc:id="c73753c5-3202-47d4-a884-dd8a2ed2727f">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload.AUS map (item) -> 
+{ 
+	Case_ID__c: item.Case_ID__c as Number,
+	Name: item.Name,
+	data_text__c: item.data_text__c,
+	data_number__c: item.data_number__c as Number
+}
+]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<ee:transform doc:name="DEBUG add invalid case" doc:id="5054af33-35d6-4928-aa79-954a4bf84e20">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[{ 
+	Case_ID__c: 645,
+	Name: "b",
+	data_text__c: "c",
+	data_number__c: "errsdf"
+}] ++ payload]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<foreach doc:name="For Each" doc:id="7ce97332-7722-4fdc-b972-1f0931d35edc" batchSize="2">
+					<salesforce:upsert doc:name="AUS Upsert" doc:id="a736fa52-72bc-4bc6-99e4-3a748737df06" config-ref="SystemB" objectType="AUS_Case__c" target="upsert_result" externalIdFieldName="Case_ID__c">
+		</salesforce:upsert>
+					<flow-ref doc:name="record failed records" doc:id="d64c4a11-48b4-41a5-9174-5dd0fc596b2f" name="record_failed_records" />
+				</foreach>
+			
+</route>
+			
+		</scatter-gather>
+				<set-variable value="#[flatten(vars.failed_cases)]" doc:name="failed_cases" doc:id="64fbf26c-3c10-4a3f-ae11-aa0c9c259cee" variableName="failed_cases" />
+				<logger level="INFO" doc:name="failed_cases" doc:id="8441beb3-c5bb-449b-8531-491a81f49b1f" message="#[output application/json --- vars.failed_cases]" />
+			</when>
+		</choice>
+	</flow>
+	<sub-flow name="record_failed_records" doc:id="eb9c5597-59a1-4bbf-82e5-2c5d1106c599" >
+		<choice doc:name="Choice" doc:id="7d078607-19a7-4091-9c4f-1b32cdca0865" >
+			<when expression="#[not vars.upsert_result.successful]">
+				<set-variable value="#[var items = vars.upsert_result.items map (item, index) -&gt; &#10;{&#10;	Case_ID__c: payload[index].Case_ID__c,&#10;	error: item.message&#10;}&#10;---&#10;filter(items, ((item)-&gt; item.error != null)) ++ (vars.failed_cases default [])]" doc:name="failed_cases" doc:id="d6b4f251-245f-4d18-a788-72b9bfabe887" variableName="failed_cases"/>
+			</when>
+		</choice>
+	</sub-flow>
+	<flow name="DEBUG_Manually_Trigger_Data_Copy" doc:id="53dd3b68-36c5-48ee-b6c7-73d1d0214022" >
+		<http:listener doc:name="Listener" doc:id="7237eda5-6606-4955-be04-763d3e121b55" config-ref="HTTP_Listener_config" path="/copy_data" />
+		<set-variable value="#[attributes.queryParams.watermark as Number]" doc:name="case_ID_watermark" doc:id="726ee227-2c35-42f8-baa6-851ad5a90316" variableName="case_ID_watermark" />
+		<flow-ref doc:name="Copy_Data" doc:id="7ae18dac-9f3a-42f1-b768-ec134262b6df" name="Copy_Data"/>
+		<set-payload value="ok" doc:name="Set Payload" doc:id="08f830d6-7843-4d4a-9fb1-ff85facf1abf" />
+	</flow>
+	<flow name="DEBUG_Generate_Cases" doc:id="795f60e1-f2ff-4af7-a3dd-47c546ea4265" >
+		<http:listener doc:name="Listener" doc:id="5eb2532d-4341-4187-847a-e5124734ebb4" config-ref="HTTP_Listener_config" path="/generate_cases" />
+		<os:retrieve doc:name="case_ID_watermark" doc:id="3f569b2d-a8e7-410c-b86c-dbafa37fc712" key="case_ID_watermark" target="case_ID_watermark">
+			<os:default-value><![CDATA[-1]]></os:default-value>
+		</os:retrieve>
+		<set-variable value='#[["USA", "CAN", "AUS"]]' doc:name="countries" doc:id="417c5c32-ed0d-4aa2-9260-0e460717d6bf" variableName="countries"/>
+		<set-variable value="#[3]" doc:name="num entries" doc:id="32cafeaf-1827-42d9-9627-920daafca7b3" variableName="num_entries"/>
+		<set-variable value="#[[]]" doc:name="entries" doc:id="92ea1830-5f50-4042-8734-0f5f4a6b0d1e" variableName="entries"/>
+		<foreach doc:name="create entries" doc:id="38a80a2c-abb4-4725-aa2a-65ad83ad5ee3" collection="#[1 to vars.num_entries]">
+			<set-variable value='#[vars.entries ++ [{&#10;	Case_ID__c: vars.case_ID_watermark + vars.counter,&#10;	Country__c: vars.countries[vars.counter mod 3],&#10;	data_text__c: "AB" ++ (vars.case_ID_watermark ++ vars.counter) as String,&#10;	data_number__c: vars.counter&#10;}]]' doc:name="entries" doc:id="20a8fe39-79a9-4a2c-8b31-771e764ef924" variableName="entries" />
+		</foreach>
+		<salesforce:upsert objectType="Case__c" doc:name="Upsert" doc:id="1c054492-d4ac-4090-93c4-f9eff06d0c0a" config-ref="SystemA" externalIdFieldName="Case_ID__c">
+			<salesforce:records ><![CDATA[#[vars.entries]]]></salesforce:records>
+		</salesforce:upsert>
+		<set-payload value="#[output application/json --- payload.successful]" doc:name="Set Payload" doc:id="e6d6d4f2-da66-4571-9ba6-d599c1c62397" />
+	</flow>
+</mule>
